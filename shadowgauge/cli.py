@@ -13,6 +13,7 @@ from .store import Store
 from .worker import run_batch
 from .bridge import analyze_bridge, classify_product_drift
 from .simulation import generate_bridge_overlap
+from .privacy import PrivacyPolicy
 
 
 def simulate(db_path: str, output: str, count: int) -> dict:
@@ -70,12 +71,16 @@ def main(argv: list[str] | None = None) -> int:
     work.add_argument("--limit", type=int, default=100)
     bridge = sub.add_parser("bridge-demo", help="reproduce a grader-only shift quarantine")
     bridge.add_argument("--output", default="bridge-report.json")
+    prune = sub.add_parser("prune", help="delete sampled content past its retention deadline")
+    prune.add_argument("--db", default="shadowgauge.db")
+    prune.add_argument("--now", required=True, help="ISO-8601 cutoff time")
+    prune.add_argument("--retention-days", type=int, default=30)
     args = parser.parse_args(argv)
     if args.command == "simulate":
         print(json.dumps(simulate(args.db, args.output, args.count), indent=2))
     elif args.command == "worker":
         print(json.dumps({"processed": run_batch(Store(args.db), args.limit)}))
-    else:
+    elif args.command == "bridge-demo":
         overlap = generate_bridge_overlap(grader_shift=True)
         analysis = analyze_bridge(overlap)
         baseline = [row["old_score"] for row in overlap["rows"]]
@@ -84,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
             baseline, current, analysis)}
         Path(args.output).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
+    else:
+        store = Store(args.db, PrivacyPolicy(args.retention_days))
+        print(json.dumps(store.prune_expired(args.now), indent=2))
     return 0
 
 

@@ -21,4 +21,6 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
       - run: python -m shadowgauge.cli bridge-demo --output bridge-report.json
+      - run: python -m shadowgauge.cli simulate --db demo.db --output report.json --count 200
+      - run: python -m shadowgauge.cli prune --db demo.db --now 2027-01-01T00:00:00+00:00 --retention-days 30
 

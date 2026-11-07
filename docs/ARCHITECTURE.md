@@ -6,7 +6,7 @@ ShadowGauge is a local-first reference implementation. It does not intercept or 
 
 ## Data contract
 
-Required event fields are `event_id`, ISO-8601 `ts`, `intent`, `question`, `context`, and `response`. Synthetic replays may add `synthetic_failure`; production integrations must not pretend to have this ground-truth label. Every sampled row also stores `inclusion_probability` and `sample_reason`.
+Required event fields are `event_id`, ISO-8601 `ts`, `intent`, `question`, `context`, and `response`. Synthetic replays may add `synthetic_failure`; production integrations must not pretend to have this ground-truth label. Every sampled row also stores `inclusion_probability` and `sample_reason`. Unknown event fields are dropped before persistence.
 
 ## Decisions
 
@@ -19,6 +19,8 @@ Required event fields are `event_id`, ISO-8601 `ts`, `intent`, `question`, `cont
 | SQLite queue | Zero-service setup and durable local demo | Single-node throughput ceiling |
 | Fixed-bin PSI | Detects distribution changes, not just mean changes | Needs calibrated bins and adequate counts |
 | Two-window gate | Reduces one-window false alarms | Adds one window of detection latency |
+| Redact before SQL | Avoid known identifier/credential patterns reaching the database | Pattern coverage is incomplete and may over-redact |
+| Event-time TTL | Makes retention reproducible in replays and backfills | Late events may be immediately eligible for deletion |
 
 ## Failure modes
 
@@ -27,6 +29,22 @@ Required event fields are `event_id`, ISO-8601 `ts`, `intent`, `question`, `cont
 - If probabilities are omitted or wrong, weighted estimates are invalid. The API rejects probabilities outside `(0, 1]`.
 - If a daily cap is reached, decisions carry `daily_cap` as the reason but are not queued. The host should count rejected decisions for coverage reporting.
 - If a grader changes, current scores are not directly comparable. The bridge requires a frozen overlap before product attribution.
+- If the prune command is not scheduled, expired rows remain. Backups, WAL files, and freed SQLite pages require separate lifecycle controls.
+
+## Privacy and retention boundary
+
+`sanitize_event` accepts only the documented schema and transforms content fields before
+the insert. It replaces detected emails, phone-like strings, bearer tokens, and common API
+key forms with typed placeholders. Metadata is validated but not pattern-redacted because
+timestamps and stable IDs must retain their meaning. Per-event audit rows record original
+and retained UTF-8 bytes plus redaction and dropped-field counts by data class.
+
+Expiry is calculated from the normalized event time and a validated 1–365 day policy.
+`prune_expired` deletes matching grades, audit rows, and sampled content in one transaction.
+When an older database is opened, existing content receives the current redaction and TTL
+policy before normal use. Regexes are not a security proof: contextual identifiers,
+obfuscated values, free-form secrets, SQLite free pages, WAL files, exports, and backups are
+outside this MVP's guarantee.
 
 ## Grader-version bridge
 
@@ -41,5 +59,5 @@ the supplied overlap.
 
 ## Production hardening path
 
-Add privacy transforms before persistence, use a shared queue and budget counter, version all policies and graders, enforce minimum segment counts, and connect incident records to an authenticated delivery adapter. Validate every threshold on a frozen replay plus human-reviewed labels before enabling paging.
+Add schema-specific DLP, scheduled deletion verification across backups, a shared queue and budget counter, version all policies and graders, enforce minimum segment counts, and connect incident records to an authenticated delivery adapter. Validate every threshold on a frozen replay plus human-reviewed labels before enabling paging.
 

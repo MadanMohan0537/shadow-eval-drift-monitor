@@ -1,6 +1,6 @@
 # ShadowGauge
 
-[![CI](https://github.com/MadanMohan0537/shadowgauge/actions/workflows/ci.yml/badge.svg)](https://github.com/MadanMohan0537/shadowgauge/actions/workflows/ci.yml)
+[![CI](https://github.com/MadanMohan0537/shadow-eval-drift-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/MadanMohan0537/shadow-eval-drift-monitor/actions/workflows/ci.yml)
 
 ShadowGauge quietly samples live AI interactions, grades copies off the request path, and raises a drift incident only after two bad windows. Its bias inspector records every sample's inclusion probability, then reports raw and inverse-probability-weighted failure rates side by side—so aggressively sampling a new intent does not get mistaken for population quality.
 
@@ -19,6 +19,7 @@ Online AI quality can regress while uptime remains green. A naive monitor can ma
 - Population Stability Index (PSI) drift checks with a two-window confirmation gate and cooldown.
 - **Sampling-bias inspector (P1 extension):** raw rate, Hájek inverse-probability estimate, capped weights, and effective sample size.
 - **Grader-version bridge (P2 extension):** dual-grade a frozen overlap, enforce per-intent coverage, and quarantine measurement shifts before incident creation.
+- **Privacy boundary:** allowlist persisted fields, redact common identifiers and credentials before SQLite, attach expiry times, report retained bytes by data class, and delete expired event/grade evidence.
 - Deterministic synthetic replay that injects a regression and produces a machine-readable report.
 - Unit/integration tests and a Python 3.11–3.13 GitHub Actions matrix.
 
@@ -41,6 +42,7 @@ To grade a batch previously placed in the SQLite queue:
 ```bash
 shadowgauge worker --db demo.db --limit 100
 shadowgauge bridge-demo --output bridge-report.json
+shadowgauge prune --db demo.db --now 2026-02-15T00:00:00+00:00 --retention-days 30
 ```
 
 Run the test suite:
@@ -96,7 +98,9 @@ if decision.included:
     Store("shadowgauge.db").enqueue(event, decision.probability, decision.reason)
 ```
 
-Call this after producing the user-visible response. Never place raw secrets or regulated data in `question`, `context`, or `response`; the current MVP has no redaction layer.
+Call this after producing the user-visible response. `Store` now persists only the declared event fields and replaces detected email addresses, phone-like strings, bearer tokens, and common API-key forms before the SQL insert. Every row receives a UTC expiry derived from its event timestamp; `prune` removes expired event content, grades, and privacy accounting. Opening an older database applies the same redaction and expiry migration to existing rows.
+
+The privacy report groups original bytes, retained bytes, and redaction counts into metadata, content, and synthetic-test classes. Unknown input fields are discarded and counted. This is deterministic data minimization, not a full DLP system: pattern matching can miss contextual identifiers and can over-redact harmless numeric text.
 
 ## Metrics to watch
 
@@ -109,6 +113,7 @@ Call this after producing the user-visible response. Never place raw secrets or 
 | Effective sample size | Are a few large weights dominating? | `report.json` |
 | PSI | Did the score distribution move? | Per evaluated window |
 | Bridge mean/flip shift | Did the measurement system change? | Overall and per intent |
+| Retained bytes/redactions | What content remains after minimization? | `report.json` by data class |
 
 ## Limitations
 
@@ -119,7 +124,9 @@ Call this after producing the user-visible response. Never place raw secrets or 
 - SQLite is appropriate for a portfolio-scale single-node MVP, not high-throughput multi-writer serving.
 - Synthetic labels prove mechanics, not external validity. Human adjudication remains necessary before consequential decisions.
 - Frozen overlap coverage may miss new or rare intents. Compatibility thresholds require calibration on real repeated grades, and quarantine delays product monitoring until the measurement change is resolved.
-- There is no authentication, PII scrubbing, retention policy, semantic grader, hosted dashboard, or outbound alert integration yet.
+- Redaction covers explicit patterns only. It does not detect names, addresses, free-form secrets, encoded credentials, or sensitive meaning; a real deployment still needs schema-specific DLP and review.
+- TTL enforcement is an explicit `prune` operation, not a resident scheduler. Operators must run it reliably; backups and SQLite free pages may retain deleted bytes until separately managed.
+- There is no authentication, semantic grader, hosted dashboard, or outbound alert integration yet.
 
 ## Responsible use
 
@@ -138,6 +145,7 @@ shadowgauge/
   store.py        SQLite queue, grades, and incidents
   monitoring.py   PSI and alert gate
   bridge.py       grader overlap validation, segment checks, incident attribution
+  privacy.py      field allowlist, deterministic redaction, TTL calculation
   simulation.py   reproducible synthetic traffic
   cli.py          simulate and worker commands
 tests/             unit and end-to-end checks
