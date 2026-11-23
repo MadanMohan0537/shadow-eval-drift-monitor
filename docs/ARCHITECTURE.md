@@ -54,10 +54,25 @@ minimum coverage per intent. It reports paired mean shifts and pass/fail flips o
 and by segment. Any coverage or compatibility violation quarantines the transition.
 `classify_product_drift` labels a shifted window `MEASUREMENT_HOLD` while the bridge
 is quarantined, preventing a grader-only change from becoming a product incident.
-This does not authenticate versions, persist approval state or prove coverage beyond
-the supplied overlap.
+The bridge analysis alone does not authenticate versions, select an active policy or
+prove coverage beyond the supplied overlap.
+
+## Grader promotion ledger
+
+`PromotionLedger` stores the bridge digest and canonical threshold snapshot with each
+candidate. A proposal must be based on the uniquely active grader. Incompatible bridge
+results move directly from proposed to quarantined; compatible candidates may move from
+proposed to approved and then active. Activation supersedes the old active policy in the
+same SQLite transaction, while a partial unique index enforces one active row. Every
+transition is append-only and includes an actor label, normalized timestamp and reason.
+
+The ledger makes local decisions reproducible but is not tamper-evident or an identity
+provider. Actor labels and clocks are caller supplied, administrators can edit the file,
+and activation records intent rather than deploying a grader. Production use needs
+authenticated operators, role separation, signed evidence and reconciliation with the
+actual serving configuration.
 
 ## Production hardening path
 
-Add schema-specific DLP, scheduled deletion verification across backups, a shared queue and budget counter, version all policies and graders, enforce minimum segment counts, and connect incident records to an authenticated delivery adapter. Validate every threshold on a frozen replay plus human-reviewed labels before enabling paging.
+Add schema-specific DLP, scheduled deletion verification across backups, a shared queue and budget counter, authenticated promotion identities, enforce minimum segment counts, and connect incident records to an authenticated delivery adapter. Validate every threshold on a frozen replay plus human-reviewed labels before enabling paging.
 

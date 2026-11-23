@@ -19,6 +19,7 @@ Online AI quality can regress while uptime remains green. A naive monitor can ma
 - Population Stability Index (PSI) drift checks with a two-window confirmation gate and cooldown.
 - **Sampling-bias inspector (P1 extension):** raw rate, Hájek inverse-probability estimate, capped weights, and effective sample size.
 - **Grader-version bridge (P2 extension):** dual-grade a frozen overlap, enforce per-intent coverage, and quarantine measurement shifts before incident creation.
+- **Bridge promotion ledger:** persist proposed, quarantined, approved, active and superseded grader states with immutable bridge hashes, thresholds and append-only decision history.
 - **Privacy boundary:** allowlist persisted fields, redact common identifiers and credentials before SQLite, attach expiry times, report retained bytes by data class, and delete expired event/grade evidence.
 - Deterministic synthetic replay that injects a regression and produces a machine-readable report.
 - Unit/integration tests and a Python 3.11–3.13 GitHub Actions matrix.
@@ -42,6 +43,7 @@ To grade a batch previously placed in the SQLite queue:
 ```bash
 shadowgauge worker --db demo.db --limit 100
 shadowgauge bridge-demo --output bridge-report.json
+shadowgauge promotion-demo --db promotion-ledger.db --output promotion-report.json
 shadowgauge prune --db demo.db --now 2026-02-15T00:00:00+00:00 --retention-days 30
 ```
 
@@ -79,6 +81,12 @@ grader-only score shift produces PSI 27.631, but the bridge quarantines it and e
 seeded application regression to emit `PRODUCT_INCIDENT`. These deterministic fixtures
 prove attribution control flow, not real-grader stability.
 
+The promotion demo records a shifted grader as quarantined, advances a compatible grader
+through proposed and approved to active, and supersedes the previous active grader in one
+transaction. The report retains the exact bridge digest, thresholds, actor label,
+timestamp and reason for every transition. SQLite enforces one active policy. These local
+pseudonyms are audit labels, not authenticated identities or separation-of-duties proof.
+
 ## Configuration and integration
 
 This MVP exposes Python seams instead of a production proxy:
@@ -100,6 +108,12 @@ if decision.included:
 
 Call this after producing the user-visible response. `Store` now persists only the declared event fields and replaces detected email addresses, phone-like strings, bearer tokens, and common API-key forms before the SQL insert. Every row receives a UTC expiry derived from its event timestamp; `prune` removes expired event content, grades, and privacy accounting. Opening an older database applies the same redaction and expiry migration to existing rows.
 
+Before changing graders, pass the frozen `analyze_bridge` result into
+`PromotionLedger.propose`. Failed coverage or compatibility is immediately quarantined;
+only a compatible proposed policy can be approved, and only an approved policy can become
+active. Proposals must name the currently active grader as their base. The ledger preserves
+history but does not deploy code or authenticate operators.
+
 The privacy report groups original bytes, retained bytes, and redaction counts into metadata, content, and synthetic-test classes. Unknown input fields are discarded and counted. This is deterministic data minimization, not a full DLP system: pattern matching can miss contextual identifiers and can over-redact harmless numeric text.
 
 ## Metrics to watch
@@ -113,6 +127,7 @@ The privacy report groups original bytes, retained bytes, and redaction counts i
 | Effective sample size | Are a few large weights dominating? | `report.json` |
 | PSI | Did the score distribution move? | Per evaluated window |
 | Bridge mean/flip shift | Did the measurement system change? | Overall and per intent |
+| Active grader policy | Which compatible grader is authorized now? | Ledger snapshot and append-only transitions |
 | Retained bytes/redactions | What content remains after minimization? | `report.json` by data class |
 
 ## Limitations
@@ -124,6 +139,7 @@ The privacy report groups original bytes, retained bytes, and redaction counts i
 - SQLite is appropriate for a portfolio-scale single-node MVP, not high-throughput multi-writer serving.
 - Synthetic labels prove mechanics, not external validity. Human adjudication remains necessary before consequential decisions.
 - Frozen overlap coverage may miss new or rare intents. Compatibility thresholds require calibration on real repeated grades, and quarantine delays product monitoring until the measurement change is resolved.
+- The promotion ledger is local workflow state, not an authorization system: actor strings are self-asserted, clocks are caller supplied, and database administrators can alter SQLite directly.
 - Redaction covers explicit patterns only. It does not detect names, addresses, free-form secrets, encoded credentials, or sensitive meaning; a real deployment still needs schema-specific DLP and review.
 - TTL enforcement is an explicit `prune` operation, not a resident scheduler. Operators must run it reliably; backups and SQLite free pages may retain deleted bytes until separately managed.
 - There is no authentication, semantic grader, hosted dashboard, or outbound alert integration yet.
@@ -145,6 +161,7 @@ shadowgauge/
   store.py        SQLite queue, grades, and incidents
   monitoring.py   PSI and alert gate
   bridge.py       grader overlap validation, segment checks, incident attribution
+  promotion.py    immutable bridge evidence and grader promotion state machine
   privacy.py      field allowlist, deterministic redaction, TTL calculation
   simulation.py   reproducible synthetic traffic
   cli.py          simulate and worker commands

@@ -1,5 +1,16 @@
 # Existing-project improvement record
 
+## 2026-11-23 — ShadowGauge
+
+- Reinspected source, 27 tests, CI, README, architecture, backlog and Project Lab #3 extensions.
+- Shipped the grader promotion ledger with immutable bridge hashes and threshold snapshots.
+- Added proposed, quarantined, approved, active and superseded transitions; stale and duplicate proposals fail, and SQLite enforces exactly one active grader.
+- Added a deterministic quarantine-and-promotion demo, five regression/CLI tests and a CI command; 32 tests pass locally.
+- Documented that actor labels and timestamps are self-asserted and that the ledger records authorization intent rather than deploying code.
+- No repository was created or renamed.
+- Next project in the rotation: CaseFoundry (#4).
+- Next ShadowGauge priority: sequential false-alarm control, followed by bridge uncertainty bands.
+
 ## 2026-11-07 — ShadowGauge
 
 - Reinspected source, 20 tests, CI, README, architecture, backlog and Project Lab extensions.

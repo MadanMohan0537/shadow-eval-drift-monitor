@@ -14,6 +14,7 @@ from .worker import run_batch
 from .bridge import analyze_bridge, classify_product_drift
 from .simulation import generate_bridge_overlap
 from .privacy import PrivacyPolicy
+from .promotion import PromotionLedger
 
 
 def simulate(db_path: str, output: str, count: int) -> dict:
@@ -71,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     work.add_argument("--limit", type=int, default=100)
     bridge = sub.add_parser("bridge-demo", help="reproduce a grader-only shift quarantine")
     bridge.add_argument("--output", default="bridge-report.json")
+    promotion = sub.add_parser("promotion-demo", help="reproduce an auditable grader promotion")
+    promotion.add_argument("--db", default="promotion-ledger.db")
+    promotion.add_argument("--output", default="promotion-report.json")
     prune = sub.add_parser("prune", help="delete sampled content past its retention deadline")
     prune.add_argument("--db", default="shadowgauge.db")
     prune.add_argument("--now", required=True, help="ISO-8601 cutoff time")
@@ -87,6 +91,19 @@ def main(argv: list[str] | None = None) -> int:
         current = [row["new_score"] for row in overlap["rows"]]
         report = {**analysis, "drift_decision": classify_product_drift(
             baseline, current, analysis)}
+        Path(args.output).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2))
+    elif args.command == "promotion-demo":
+        ledger = PromotionLedger(args.db)
+        ledger.initialize("lexical-v1", "demo-operator", "2026-01-05T00:00:00+00:00")
+        rejected = analyze_bridge(generate_bridge_overlap(grader_shift=True))
+        ledger.propose(rejected, "demo-evaluator", "2026-01-05T00:05:00+00:00")
+        compatible = analyze_bridge(generate_bridge_overlap(grader_shift=False))
+        ledger.propose(compatible, "demo-evaluator", "2026-01-05T00:10:00+00:00")
+        ledger.approve(compatible["new_grader"], "demo-approver",
+                       "2026-01-05T00:15:00+00:00", "frozen overlap reviewed")
+        report = ledger.activate(compatible["new_grader"], "demo-operator",
+                                 "2026-01-05T00:20:00+00:00", "deployment activated")
         Path(args.output).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
     else:
